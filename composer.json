@@ -1,0 +1,18 @@
+{
+    "name": "sms/reminder",
+    "description": "SMS reminder app",
+    "type": "project",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "App",
+            "email": "app@example.com"
+        }
+    ],
+    "minimum-stability": "stable",
+    "require": {
+        "infobip/infobip-api-php-client": "^5.0",
+        "vlucas/phpdotenv": "^5.6",
+        "phpoffice/phpspreadsheet": "^2.1"
+    }
+}
