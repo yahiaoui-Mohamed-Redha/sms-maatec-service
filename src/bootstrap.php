@@ -54,48 +54,55 @@ function e(?string $value): string {
     return htmlspecialchars($value ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
-// Database (SQLite)
-$dbPath = $_ENV['DB_PATH'] ?? (BASE_PATH . '/storage/app.db');
-$pdo = new PDO('sqlite:' . $dbPath, options: [
+// Database (MySQL)
+$dbHost = $_ENV['DB_HOST'] ?? '127.0.0.1';
+$dbPort = (int)($_ENV['DB_PORT'] ?? 3306);
+$dbName = $_ENV['DB_DATABASE'] ?? 'insurance_sms';
+$dbUser = $_ENV['DB_USERNAME'] ?? 'root';
+$dbPass = $_ENV['DB_PASSWORD'] ?? '';
+$dbCharset = $_ENV['DB_CHARSET'] ?? 'utf8mb4';
+
+$dsn = sprintf('mysql:host=%s;port=%d;dbname=%s;charset=%s', $dbHost, $dbPort, $dbName, $dbCharset);
+$pdo = new PDO($dsn, $dbUser, $dbPass, [
     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
 ]);
 
-// Initialize schema
+// Initialize schema (idempotent)
 $pdo->exec('CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    agency_code TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL
-)');
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    agency_code VARCHAR(100) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;');
 
 $pdo->exec('CREATE TABLE IF NOT EXISTS policies (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    insurance_number TEXT NOT NULL,
-    customer_name TEXT NOT NULL,
-    phone TEXT NOT NULL,
-    start_date TEXT NOT NULL,
-    end_date TEXT NOT NULL,
-    notified INTEGER NOT NULL DEFAULT 0,
-    notified_at TEXT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(insurance_number, end_date)
-)');
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    insurance_number VARCHAR(191) NOT NULL,
+    customer_name VARCHAR(191) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NOT NULL,
+    notified TINYINT(1) NOT NULL DEFAULT 0,
+    notified_at DATETIME NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE KEY unique_policy_cycle (insurance_number, end_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;');
 
 $pdo->exec('CREATE TABLE IF NOT EXISTS sms_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    policy_id INTEGER NULL,
-    phone TEXT NOT NULL,
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    policy_id INT NULL,
+    phone VARCHAR(50) NOT NULL,
     message TEXT NOT NULL,
-    provider_message_id TEXT NULL,
-    status TEXT NOT NULL,
+    provider_message_id VARCHAR(191) NULL,
+    status VARCHAR(50) NOT NULL,
     error TEXT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY(policy_id) REFERENCES policies(id)
-)');
+    created_at DATETIME NOT NULL,
+    CONSTRAINT fk_sms_policy FOREIGN KEY (policy_id) REFERENCES policies(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;');
 
-// Seed default user if not exists
+// Seed default user if not exists (from env)
 $agencyCode = trim((string)($_ENV['AGENCY_CODE'] ?? ''));
 $existingUser = null;
 if ($agencyCode !== '') {
@@ -111,7 +118,6 @@ if (!$existingUser && $agencyCode !== '') {
         $passwordHash = password_hash($plain, PASSWORD_DEFAULT);
     }
     if ($passwordHash === '') {
-        // Generate a random password if none provided
         $generated = bin2hex(random_bytes(8));
         $passwordHash = password_hash($generated, PASSWORD_DEFAULT);
         error_log('Generated temporary admin password: ' . $generated);
@@ -120,7 +126,7 @@ if (!$existingUser && $agencyCode !== '') {
     $stmt->execute([
         ':code' => $agencyCode,
         ':hash' => $passwordHash,
-        ':ts' => (new DateTimeImmutable())->format(DateTimeInterface::ATOM),
+        ':ts' => (new DateTimeImmutable())->format('Y-m-d H:i:s'),
     ]);
 }
 

@@ -13,7 +13,6 @@ function parse_date(string $dateStr): ?string {
     $dateStr = trim($dateStr);
     if ($dateStr === '') return null;
     try {
-        // Accepts formats like d/m/Y, Y-m-d, m-d-Y, etc.
         $ts = strtotime($dateStr);
         if ($ts === false) return null;
         return (new DateTimeImmutable('@' . $ts))->setTimezone(new DateTimeZone(date_default_timezone_get()))->format('Y-m-d');
@@ -23,14 +22,14 @@ function parse_date(string $dateStr): ?string {
 }
 
 function upsert_policy(PDO $pdo, array $data): void {
-    $now = (new DateTimeImmutable())->format(DateTimeInterface::ATOM);
+    $now = (new DateTimeImmutable())->format('Y-m-d H:i:s');
     $stmt = $pdo->prepare('INSERT INTO policies (insurance_number, customer_name, phone, start_date, end_date, notified, created_at, updated_at)
         VALUES (:insurance_number, :customer_name, :phone, :start_date, :end_date, :notified, :created_at, :updated_at)
-        ON CONFLICT(insurance_number, end_date) DO UPDATE SET
-            customer_name = excluded.customer_name,
-            phone = excluded.phone,
-            start_date = excluded.start_date,
-            updated_at = excluded.updated_at');
+        ON DUPLICATE KEY UPDATE
+            customer_name = VALUES(customer_name),
+            phone = VALUES(phone),
+            start_date = VALUES(start_date),
+            updated_at = VALUES(updated_at)');
     $stmt->execute([
         ':insurance_number' => $data['insurance_number'],
         ':customer_name' => $data['customer_name'],
@@ -62,13 +61,13 @@ function fetch_policies(PDO $pdo, array $filters = []): array {
         $days = (int)$filters['expiring'];
         $today = (new DateTimeImmutable('today'))->format('Y-m-d');
         $until = (new DateTimeImmutable('+' . $days . ' days'))->format('Y-m-d');
-        $conditions[] = 'date(end_date) BETWEEN :from AND :to';
+        $conditions[] = 'DATE(end_date) BETWEEN :from AND :to';
         $params[':from'] = $today;
         $params[':to'] = $until;
     }
 
     $where = $conditions ? ('WHERE ' . implode(' AND ', $conditions)) : '';
-    $sql = 'SELECT * FROM policies ' . $where . ' ORDER BY date(end_date) ASC, id DESC LIMIT 1000';
+    $sql = 'SELECT * FROM policies ' . $where . ' ORDER BY DATE(end_date) ASC, id DESC LIMIT 1000';
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     return $stmt->fetchAll();
@@ -77,14 +76,14 @@ function fetch_policies(PDO $pdo, array $filters = []): array {
 function find_due_policies(PDO $pdo, int $windowDays): array {
     $today = (new DateTimeImmutable('today'))->format('Y-m-d');
     $until = (new DateTimeImmutable('+' . $windowDays . ' days'))->format('Y-m-d');
-    $stmt = $pdo->prepare('SELECT * FROM policies WHERE notified = 0 AND date(end_date) BETWEEN :from AND :to ORDER BY date(end_date) ASC');
+    $stmt = $pdo->prepare('SELECT * FROM policies WHERE notified = 0 AND DATE(end_date) BETWEEN :from AND :to ORDER BY DATE(end_date) ASC');
     $stmt->execute([':from' => $today, ':to' => $until]);
     return $stmt->fetchAll();
 }
 
 function mark_notified(PDO $pdo, int $policyId): void {
     $stmt = $pdo->prepare('UPDATE policies SET notified = 1, notified_at = :ts, updated_at = :ts WHERE id = :id');
-    $stmt->execute([':ts' => (new DateTimeImmutable())->format(DateTimeInterface::ATOM), ':id' => $policyId]);
+    $stmt->execute([':ts' => (new DateTimeImmutable())->format('Y-m-d H:i:s'), ':id' => $policyId]);
 }
 
 function log_sms(PDO $pdo, ?int $policyId, string $phone, string $message, string $status, ?string $providerMessageId = null, ?string $error = null): void {
@@ -97,6 +96,6 @@ function log_sms(PDO $pdo, ?int $policyId, string $phone, string $message, strin
         ':status' => $status,
         ':provider_message_id' => $providerMessageId,
         ':error' => $error,
-        ':created_at' => (new DateTimeImmutable())->format(DateTimeInterface::ATOM),
+        ':created_at' => (new DateTimeImmutable())->format('Y-m-d H:i:s'),
     ]);
 }
